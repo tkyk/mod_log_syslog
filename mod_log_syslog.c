@@ -25,6 +25,8 @@
  *
  */
 
+#include <string.h>
+#include <sys/syslog.h>
 #include "httpd.h"
 #include "http_config.h"
 #include "http_protocol.h"
@@ -35,6 +37,8 @@
 
 #define MODULE_NAME "mod_log_syslog"
 #define MODULE_VERSION "0.0.1"
+
+#define CUSTOM_LOG_PREFIX "syslog:"
 
 #ifdef _DEBUG
 #define DEBUGLOG(...) ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, 0, NULL, MODULE_NAME ": " __VA_ARGS__)
@@ -65,9 +69,24 @@ static void *create_log_syslog_server_conf(apr_pool_t *p, server_rec *s)
     return (void *)config;
 }
 
-void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *name) 
+static void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *name) 
 {
     DEBUGLOG("log_writer_init is called with: %s", name);
+
+    // starts with syslog:
+    if(strstr(name, CUSTOM_LOG_PREFIX) == name) {
+        int *flag = apr_pcalloc(p, sizeof(int));
+
+        //TODO: get facility and priority from name
+        *flag = LOG_LOCAL1|LOG_INFO;
+
+        log_syslog_config *config = ap_get_module_config(s->module_config, &log_syslog_module);
+        /* Using memory address as a key */
+        apr_hash_set(config->handle_table, flag, sizeof(int *), flag);
+
+        DEBUGLOG("%s is init as syslog, flag=%d and hash_count=%u", name, *flag, apr_hash_count(config->handle_table));
+        return flag;
+    }
 
     if(default_log_writer_init != NULL && default_log_writer_init != log_syslog_writer_init) {
         return default_log_writer_init(p, s, name);
@@ -75,7 +94,7 @@ void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *name)
     return NULL;
 }
 
-apr_status_t log_syslog_writer(
+static apr_status_t log_syslog_writer(
         request_rec *r,
         void *handle, 
         const char **portions,
@@ -84,6 +103,17 @@ apr_status_t log_syslog_writer(
         apr_size_t len)
 {
     DEBUGLOG("log_writer is called");
+
+    log_syslog_config *config = ap_get_module_config(r->server->module_config, &log_syslog_module);
+    /* Using memory address as a key */
+    int *flag = apr_hash_get(config->handle_table, handle, sizeof(int *));
+    if(flag) {
+        DEBUGLOG("syslog handle is found, writing with flag=%d", *flag);
+
+        //TODO: build complete access log from arguments
+        syslog(*flag, "%s", r->uri);
+        return APR_SUCCESS;
+    }
 
     if(default_log_writer != NULL && default_log_writer != log_syslog_writer) {
         return default_log_writer(r, handle, portions, lengths, nelts, len);
