@@ -89,7 +89,7 @@ apr_status_t log_syslog_writer(
         return default_log_writer(r, handle, portions, lengths, nelts, len);
     }
 
-    ap_log_rerror(APLOG_MARK, APLOG_CRIT, APR_EGENERAL, r, "No valid ap_log_writer is available");
+    ap_log_rerror(APLOG_MARK, APLOG_CRIT, APR_EGENERAL, r, MODULE_NAME ": No valid ap_log_writer is available!");
     return APR_EGENERAL;
 }
 
