@@ -101,12 +101,8 @@ static int log_syslog_open_logs(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t 
     set_writer_init = APR_RETRIEVE_OPTIONAL_FN(ap_log_set_writer_init);
     set_writer = APR_RETRIEVE_OPTIONAL_FN(ap_log_set_writer);
 
-    if(default_log_writer_init == NULL) {
-        default_log_writer_init = set_writer_init(log_syslog_writer_init);
-    }
-    if(default_log_writer == NULL) {
-        default_log_writer = set_writer(log_syslog_writer);
-    }
+    default_log_writer_init = set_writer_init(log_syslog_writer_init);
+    default_log_writer = set_writer(log_syslog_writer);
 
     return OK;
 }
