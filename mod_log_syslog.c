@@ -79,11 +79,15 @@ static syslog_code_t syslog_priorities[] = {
     { NULL, -1 },
 };
 
+// (num of facilities) * (num of priorities) < 100
+static int syslog_flag_table[100];
+
 static ap_log_writer_init *default_log_writer_init = NULL;
 static ap_log_writer      *default_log_writer      = NULL;
 
 typedef struct {
-    apr_hash_t *handle_table;
+    apr_hash_t *name_to_pointer;
+    unsigned int counter;
 } log_syslog_config;
 
 
@@ -92,7 +96,8 @@ static void *create_log_syslog_server_conf(apr_pool_t *p, server_rec *s)
     log_syslog_config *config =
         (log_syslog_config *)apr_pcalloc(p, sizeof(*config));
 
-    config->handle_table = apr_hash_make(p);
+    config->name_to_pointer = apr_hash_make(p);
+    config->counter = 0;
 
     return (void *)config;
 }
@@ -131,37 +136,53 @@ static int extract_priority(const char *rest, int *priority)
     return 0;
 }
 
+static int *get_next_flag_reference(apr_pool_t *p, log_syslog_config *config, const char *name)
+{
+    int *flag_reference;
+    int flag;
+    int facility, priority;
+    const char *rest = name + sizeof(CUSTOM_LOG_PREFIX) - 1;
+
+    rest = extract_facility(rest, &facility);
+    if(rest && extract_priority(rest, &priority)) {
+        flag = facility|priority;
+        syslog_flag_table[config->counter] = flag;
+        flag_reference = syslog_flag_table + config->counter;
+
+        config->counter++;
+        return flag_reference;
+    }
+    return NULL;
+}
+
 static void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *name) 
 {
     DEBUGLOG("log_writer_init is called with: %s", name);
 
     // starts with syslog:
     if(strstr(name, CUSTOM_LOG_PREFIX) == name) {
-        const char *rest = name + sizeof(CUSTOM_LOG_PREFIX) - 1;
-        int *flag = apr_pcalloc(p, sizeof(int));
-        int facility, priority;
+        log_syslog_config *config;
+        int *flag_reference;
 
-        rest = extract_facility(rest, &facility);
-        if(rest && extract_priority(rest, &priority)) {
-            *flag = facility|priority;
-        } else {
-            ap_log_error(
-                    APLOG_MARK,
-                    APLOG_CRIT,
-                    APR_EGENERAL,
-                    s,
-                    MODULE_NAME ": Invalid syslog facility/priority => %s",
-                    name
-            );
-            return NULL;
+        config = ap_get_module_config(s->module_config, &log_syslog_module);
+        if((flag_reference = apr_hash_get(config->name_to_pointer, name, APR_HASH_KEY_STRING))) {
+            DEBUGLOG("%s is already in hash, flag=%d", name, *flag_reference);
+            return flag_reference;
         }
-
-        log_syslog_config *config = ap_get_module_config(s->module_config, &log_syslog_module);
-        /* Using memory address as a key */
-        apr_hash_set(config->handle_table, flag, sizeof(int *), flag);
-
-        DEBUGLOG("%s is init as syslog, flag=%d and hash_count=%u", name, *flag, apr_hash_count(config->handle_table));
-        return flag;
+        if((flag_reference = get_next_flag_reference(p, config, name))) {
+            apr_hash_set(config->name_to_pointer, name, APR_HASH_KEY_STRING, flag_reference);
+            DEBUGLOG("Register %s to hash, flag=%d", name, *flag_reference);
+            return flag_reference;
+        }
+        ap_log_error(
+                APLOG_MARK,
+                APLOG_CRIT,
+                APR_EGENERAL,
+                s,
+                MODULE_NAME ": Invalid syslog facility/priority => %s",
+                name
+                );
+        return NULL;
     }
 
     if(default_log_writer_init != NULL && default_log_writer_init != log_syslog_writer_init) {
@@ -181,9 +202,14 @@ static apr_status_t log_syslog_writer(
     DEBUGLOG("log_writer is called");
 
     log_syslog_config *config = ap_get_module_config(r->server->module_config, &log_syslog_module);
-    /* Using memory address as a key */
-    int *flag = apr_hash_get(config->handle_table, handle, sizeof(int *));
-    if(flag) {
+    int *flag_reference = (int *)handle;
+
+    /* handle is inside the syslog_flag_table array */
+    if(
+            syslog_flag_table <= flag_reference &&
+            flag_reference <= (syslog_flag_table + config->counter)
+      ) {
+        int flag = *flag_reference;
         int i;
         char *s;
         char *str = apr_pcalloc(r->pool, len + 1);
@@ -193,8 +219,8 @@ static apr_status_t log_syslog_writer(
             s += lengths[i];
         }
 
-        DEBUGLOG("syslog handle is found, writing with flag=%d", *flag);
-        syslog(*flag, "%s", str);
+        DEBUGLOG("syslog handle is found, writing with flag=%d", flag);
+        syslog(flag, "%s", str);
         return APR_SUCCESS;
     }
 
