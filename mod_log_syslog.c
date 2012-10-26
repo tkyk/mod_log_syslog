@@ -155,6 +155,16 @@ static int *get_next_flag_reference(apr_pool_t *p, log_syslog_config *config, co
     return NULL;
 }
 
+/*
+ * log_syslog_writer_init and get_next_flag_reference work like:
+ *
+ * if name matches "syslog:{facility}.{priority}"
+ *   unless config->name_to_pointer[name] exists
+ *     syslog_flag_table[config->counter] = facility|priority
+ *     config->name_to_pointer[name] = syslog_flag_table + config->counter++
+ *   return config->name_to_pointer[name]
+ *
+ */
 static void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *name) 
 {
     DEBUGLOG("log_writer_init is called with: %s", name);
@@ -191,6 +201,15 @@ static void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *na
     return NULL;
 }
 
+/*
+ * If handle is a pointer refering to syslog_flag_table array,
+ * it was initialized as a syslog writer in log_syslog_writer_init
+ * and its dereferenced value is syslog flag.
+ *
+ * Otherwise this module is not responsible for the handle
+ * and passes it to the default log_writer.
+ *
+ */
 static apr_status_t log_syslog_writer(
         request_rec *r,
         void *handle, 
@@ -232,6 +251,14 @@ static apr_status_t log_syslog_writer(
     return APR_EGENERAL;
 }
 
+/*
+ * This hook must be called:
+ * - After mod_log_config's configuration phase,
+ *   because log_writer{_init} can be changed by configuration directives.
+ * - Before mod_log_config's open_logs,
+ *   i.e. log_writer_init is called.
+ *
+ */
 static int log_syslog_open_logs(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp, server_rec *s)
 {
     static APR_OPTIONAL_FN_TYPE(ap_log_set_writer_init) *set_writer_init;
