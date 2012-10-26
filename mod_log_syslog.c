@@ -108,10 +108,17 @@ static apr_status_t log_syslog_writer(
     /* Using memory address as a key */
     int *flag = apr_hash_get(config->handle_table, handle, sizeof(int *));
     if(flag) {
-        DEBUGLOG("syslog handle is found, writing with flag=%d", *flag);
+        int i;
+        char *s;
+        char *str = apr_pcalloc(r->pool, len + 1);
 
-        //TODO: build complete access log from arguments
-        syslog(*flag, "%s", r->uri);
+        for (i = 0, s = str; i < nelts; ++i) {
+            memcpy(s, portions[i], lengths[i]);
+            s += lengths[i];
+        }
+
+        DEBUGLOG("syslog handle is found, writing with flag=%d", *flag);
+        syslog(*flag, "%s", str);
         return APR_SUCCESS;
     }
 
