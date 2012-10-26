@@ -50,6 +50,36 @@
 
 module AP_MODULE_DECLARE_DATA log_syslog_module;
 
+typedef struct syslog_code {
+	char *name;
+	int	value;
+} syslog_code_t;
+
+/* must end with '.' */
+static syslog_code_t syslog_facilities[] = {
+    { "local0.", LOG_LOCAL0 },
+    { "local1.", LOG_LOCAL1 },
+    { "local2.", LOG_LOCAL2 },
+    { "local3.", LOG_LOCAL3 },
+    { "local4.", LOG_LOCAL4 },
+    { "local5.", LOG_LOCAL5 },
+    { "local6.", LOG_LOCAL6 },
+    { "local7.", LOG_LOCAL7 },
+    { "user.",   LOG_USER   },
+    { NULL, -1 },
+};
+
+static syslog_code_t syslog_priorities[] = {
+    { "debug",   LOG_DEBUG   },
+    { "info",    LOG_INFO    },
+    { "notice",  LOG_NOTICE  },
+    { "warning", LOG_WARNING },
+    { "err",     LOG_ERR     },
+    { "crit",    LOG_CRIT    },
+    { "alert",   LOG_ALERT   },
+    { "emerg",   LOG_EMERG   },
+    { NULL, -1 },
+};
 
 static ap_log_writer_init *default_log_writer_init = NULL;
 static ap_log_writer      *default_log_writer      = NULL;
@@ -69,16 +99,64 @@ static void *create_log_syslog_server_conf(apr_pool_t *p, server_rec *s)
     return (void *)config;
 }
 
+/*
+ * Searches "<facility>." from string
+ * and returns rest of the string
+ */
+static const char *extract_facility(const char *rest, int *facility)
+{
+    syslog_code_t *code;
+    for(code = syslog_facilities; code->name; code++) {
+        if(strstr(rest, code->name) == rest) {
+            *facility = code->value;
+            return rest + strlen(code->name);
+        }
+    }
+    *facility = 0;
+    return NULL;
+}
+
+/*
+ * Tests if the string is valid priority string.
+ * If valid set *priority and return 1
+ */
+static int extract_priority(const char *rest, int *priority)
+{
+    syslog_code_t *code;
+    for(code = syslog_priorities; code->name; code++) {
+        if(strcmp(rest, code->name) == 0) {
+            *priority = code->value;
+            return 1;
+        }
+    }
+    *priority = 0;
+    return 0;
+}
+
 static void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *name) 
 {
     DEBUGLOG("log_writer_init is called with: %s", name);
 
     // starts with syslog:
     if(strstr(name, CUSTOM_LOG_PREFIX) == name) {
+        const char *rest = name + sizeof(CUSTOM_LOG_PREFIX) - 1;
         int *flag = apr_pcalloc(p, sizeof(int));
+        int facility, priority;
 
-        //TODO: get facility and priority from name
-        *flag = LOG_LOCAL1|LOG_INFO;
+        rest = extract_facility(rest, &facility);
+        if(rest && extract_priority(rest, &priority)) {
+            *flag = facility|priority;
+        } else {
+            ap_log_error(
+                    APLOG_MARK,
+                    APLOG_CRIT,
+                    APR_EGENERAL,
+                    s,
+                    MODULE_NAME ": Invalid syslog facility/priority => %s",
+                    name
+            );
+            return NULL;
+        }
 
         log_syslog_config *config = ap_get_module_config(s->module_config, &log_syslog_module);
         /* Using memory address as a key */
