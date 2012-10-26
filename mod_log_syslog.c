@@ -36,7 +36,7 @@
 #include "mod_log_config.h"
 
 #define MODULE_NAME "mod_log_syslog"
-#define MODULE_VERSION "0.0.1"
+#define MODULE_VERSION "0.1.0"
 
 #define CUSTOM_LOG_PREFIX "syslog:"
 
@@ -45,8 +45,6 @@
 #else
 #define DEBUGLOG(...) //
 #endif
-
-#define TRACELOG(...) ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, 0, NULL, MODULE_NAME ": " __VA_ARGS__)
 
 module AP_MODULE_DECLARE_DATA log_syslog_module;
 
