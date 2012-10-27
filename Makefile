@@ -26,7 +26,7 @@ install: all
 
 #   cleanup
 clean:
-	-rm -f mod_log_syslog.o mod_log_syslog.lo mod_log_syslog.slo mod_log_syslog.la 
+	-rm -f mod_log_syslog.o mod_log_syslog.lo mod_log_syslog.slo mod_log_syslog.la .libs/*
 
 #   simple test
 test: reload
