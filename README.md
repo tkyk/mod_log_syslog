@@ -24,7 +24,7 @@ Possible priorities: `debug`, `info`, `notice`, `warning`, `err`, `crit`, `alert
 Requirements
 ------------
 
-* Apache >= 2.2
+* Apache 2.2, 2.4
 
 Install
 ------------
