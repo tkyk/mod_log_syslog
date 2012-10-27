@@ -102,9 +102,11 @@ static void *create_log_syslog_server_conf(apr_pool_t *p, server_rec *s)
     return (void *)config;
 }
 
-/*
+/**
  * Searches "<facility>." from string
- * and returns rest of the string
+ * and set the value to facility parameter.
+ *
+ * @return rest of the string if found, or NULL
  */
 static const char *extract_facility(const char *rest, int *facility)
 {
@@ -119,9 +121,11 @@ static const char *extract_facility(const char *rest, int *facility)
     return NULL;
 }
 
-/*
- * Tests if the string is valid priority string.
- * If valid set *priority and return 1
+/**
+ * Tests if the string is a valid priority string
+ * and set the value to priority parameter.
+ *
+ * @return 1 if valid, or 0
  */
 static int extract_priority(const char *rest, int *priority)
 {
@@ -136,12 +140,17 @@ static int extract_priority(const char *rest, int *priority)
     return 0;
 }
 
-/*
- * Extracts facility and priority, then finds/adds it from/to syslog_flag_table.
+/**
+ * Computes a flag value from facility and priority extracted from name
+ * and finds/adds the value from/to syslog_flag_table.
+ * Return value is a pointer to the element of syslog_flag_table array,
+ * or NULL if name is not formatted currectly.
  *
  * Simple loop is fast enough to find flag from array,
  * because syslog_flag_table has at most 100 elements
  * and much smaller in typical usage.
+ *
+ * @return pointer to the element of syslog_flag_table array
  */
 static int *get_flag_reference(log_syslog_config *config, const char *name)
 {
@@ -167,7 +176,7 @@ static int *get_flag_reference(log_syslog_config *config, const char *name)
     return NULL;
 }
 
-/*
+/**
  * log_syslog_writer_init and get_flag_reference work like:
  *
  * if name matches "syslog:{facility}.{priority}"
@@ -175,6 +184,7 @@ static int *get_flag_reference(log_syslog_config *config, const char *name)
  *     config->syslog_flag_table[config->counter++] = facility|priority
  *   return syslog_flag_table + config->counter
  *
+ * @return pointer to the element of syslog_flag_table
  */
 static void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *name) 
 {
@@ -206,7 +216,7 @@ static void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *na
     return NULL;
 }
 
-/*
+/**
  * If handle is a pointer refering to syslog_flag_table array,
  * it was initialized as a syslog writer in log_syslog_writer_init
  * and its dereferenced value is syslog flag.
@@ -214,6 +224,7 @@ static void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *na
  * Otherwise this module is not responsible for the handle
  * and passes it to the default log_writer.
  *
+ * @return apr_status_t
  */
 static apr_status_t log_syslog_writer(
         request_rec *r,
