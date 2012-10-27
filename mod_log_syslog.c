@@ -32,7 +32,6 @@
 #include "http_protocol.h"
 #include "http_log.h"
 #include "ap_config.h"
-#include "apr_hash.h"
 #include "mod_log_config.h"
 
 #define MODULE_NAME "mod_log_syslog"
@@ -79,14 +78,11 @@ static syslog_code_t syslog_priorities[] = {
     { NULL, -1 },
 };
 
-// (num of facilities) * (num of priorities) < 100
-static int syslog_flag_table[100];
-
 static ap_log_writer_init *default_log_writer_init = NULL;
 static ap_log_writer      *default_log_writer      = NULL;
 
 typedef struct {
-    apr_hash_t *name_to_pointer;
+    int *syslog_flag_table;
     unsigned int counter;
 } log_syslog_config;
 
@@ -96,7 +92,11 @@ static void *create_log_syslog_server_conf(apr_pool_t *p, server_rec *s)
     log_syslog_config *config =
         (log_syslog_config *)apr_pcalloc(p, sizeof(*config));
 
-    config->name_to_pointer = apr_hash_make(p);
+    /* number of flag variations are at most 100 */
+    apr_size_t table_size = sizeof(int) 
+        * (sizeof(syslog_facilities) / sizeof(syslog_code_t) - 1)
+        * (sizeof(syslog_priorities) / sizeof(syslog_code_t) - 1);
+    config->syslog_flag_table = apr_pcalloc(p, table_size);
     config->counter = 0;
 
     return (void *)config;
@@ -136,33 +136,44 @@ static int extract_priority(const char *rest, int *priority)
     return 0;
 }
 
-static int *get_next_flag_reference(apr_pool_t *p, log_syslog_config *config, const char *name)
+/*
+ * Extracts facility and priority, then finds/adds it from/to syslog_flag_table.
+ *
+ * Simple loop is fast enough to find flag from array,
+ * because syslog_flag_table has at most 100 elements
+ * and much smaller in typical usage.
+ */
+static int *get_flag_reference(log_syslog_config *config, const char *name)
 {
-    int *flag_reference;
-    int flag;
-    int facility, priority;
+    int flag, facility, priority;
     const char *rest = name + sizeof(CUSTOM_LOG_PREFIX) - 1;
 
     rest = extract_facility(rest, &facility);
     if(rest && extract_priority(rest, &priority)) {
-        flag = facility|priority;
-        syslog_flag_table[config->counter] = flag;
-        flag_reference = syslog_flag_table + config->counter;
+        int i;
 
-        config->counter++;
-        return flag_reference;
+        flag = facility|priority;
+        for(i = 0; i<config->counter; i++) {
+            if(config->syslog_flag_table[i] == flag) {
+                DEBUGLOG("%s is already in table, flag=%d", name, flag);
+                return config->syslog_flag_table + i;
+            }
+        }
+
+        DEBUGLOG("Register %s to table, flag=%d", name, flag);
+        config->syslog_flag_table[config->counter] = flag;
+        return config->syslog_flag_table + config->counter++;
     }
     return NULL;
 }
 
 /*
- * log_syslog_writer_init and get_next_flag_reference work like:
+ * log_syslog_writer_init and get_flag_reference work like:
  *
  * if name matches "syslog:{facility}.{priority}"
- *   unless config->name_to_pointer[name] exists
- *     syslog_flag_table[config->counter] = facility|priority
- *     config->name_to_pointer[name] = syslog_flag_table + config->counter++
- *   return config->name_to_pointer[name]
+ *   unless config->syslog_flag_table includes (facility|priority)
+ *     config->syslog_flag_table[config->counter++] = facility|priority
+ *   return syslog_flag_table + config->counter
  *
  */
 static void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *name) 
@@ -175,13 +186,7 @@ static void *log_syslog_writer_init(apr_pool_t *p, server_rec *s, const char *na
         int *flag_reference;
 
         config = ap_get_module_config(s->module_config, &log_syslog_module);
-        if((flag_reference = apr_hash_get(config->name_to_pointer, name, APR_HASH_KEY_STRING))) {
-            DEBUGLOG("%s is already in hash, flag=%d", name, *flag_reference);
-            return flag_reference;
-        }
-        if((flag_reference = get_next_flag_reference(p, config, name))) {
-            apr_hash_set(config->name_to_pointer, name, APR_HASH_KEY_STRING, flag_reference);
-            DEBUGLOG("Register %s to hash, flag=%d", name, *flag_reference);
+        if((flag_reference = get_flag_reference(config, name))) {
             return flag_reference;
         }
         ap_log_error(
@@ -225,8 +230,8 @@ static apr_status_t log_syslog_writer(
 
     /* handle is inside the syslog_flag_table array */
     if(
-            syslog_flag_table <= flag_reference &&
-            flag_reference <= (syslog_flag_table + config->counter)
+            config->syslog_flag_table <= flag_reference &&
+            flag_reference <= (config->syslog_flag_table + config->counter)
       ) {
         int flag = *flag_reference;
         int i;
